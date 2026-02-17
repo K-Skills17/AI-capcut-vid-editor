@@ -21,6 +21,11 @@ app.use(express.urlencoded({ extended: true }));
 // Static files
 app.use(express.static(path.join(__dirname, '../public')));
 
+// Health check (no dependencies — always responds)
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok' });
+});
+
 // API routes
 app.use('/api', apiRoutes);
 
