@@ -12,6 +12,9 @@ const { generateGuidePDF } = require('../utils/pdfGenerator');
 // In-memory status tracking for SSE (Server-Sent Events)
 const statusMap = new Map();
 
+// Store processed reel results (Drive links) keyed by videoId
+const reelsMap = new Map();
+
 // Middleware: extend timeout for upload routes (default 30 min for large files)
 function uploadTimeout(req, res, next) {
   req.setTimeout(config.uploadTimeoutMs);
@@ -55,8 +58,13 @@ router.post('/upload', apiLimiter, uploadTimeout, upload.single('video'), async 
       },
     });
 
-    // Wait briefly for the video record to be created so we can return the ID
+    // Wait for full processing to complete
     const result = await processingPromise;
+
+    // Store reel results for later retrieval by the results endpoint
+    if (result.processedReels) {
+      reelsMap.set(result.videoId, result.processedReels);
+    }
 
     res.json({
       success: true,
@@ -125,6 +133,10 @@ router.post('/upload-async', apiLimiter, uploadTimeout, upload.single('video'), 
       onStatus: (vid, status, detail) => {
         statusMap.set(vid, { status, detail, updatedAt: Date.now() });
       },
+    }).then((result) => {
+      if (result.processedReels) {
+        reelsMap.set(videoId, result.processedReels);
+      }
     }).catch((err) => {
       console.error(`Background processing error for ${videoId}:`, err);
       statusMap.set(videoId, { status: 'error', detail: err.message, updatedAt: Date.now() });
@@ -196,6 +208,9 @@ router.get('/results/:videoId', async (req, res) => {
     // Parse structured cut data for Phase 2
     const cutData = analysis.parseCutData(analysisData.cutting_guide);
 
+    // Include processed reel links if available
+    const reels = reelsMap.get(videoId) || null;
+
     res.json({
       video: {
         id: video.id,
@@ -215,6 +230,7 @@ router.get('/results/:videoId', async (req, res) => {
         aiModelUsed: analysisData.ai_model_used,
         cutData,
       },
+      processedReels: reels,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });

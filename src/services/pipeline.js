@@ -11,6 +11,8 @@ const supabase = require('./supabase');
 const transcription = require('./transcription');
 const analysis = require('./analysis');
 const videoProcessor = require('./videoProcessor');
+const driveUploader = require('./driveUploader');
+const emailService = require('./emailService');
 
 /**
  * Get available disk space in MB for the given path.
@@ -152,7 +154,16 @@ async function processVideo({
           reelsOutputDir,
           { scaleVertical: true, skipExpensiveOps: isLargeFile }
         );
-        notify('processed', `Created ${processedReels.filter((r) => r.status === 'success').length} reel(s)`);
+        const successCount = processedReels.filter((r) => r.status === 'success').length;
+        notify('processed', `Created ${successCount} reel(s)`);
+
+        // 5b. Upload reels to Google Drive (frees local disk)
+        if (driveUploader.isConfigured() && successCount > 0) {
+          notify('uploading_drive', 'Uploading reels to Google Drive...');
+          processedReels = await driveUploader.uploadReels(processedReels, videoId);
+          const uploadedCount = processedReels.filter((r) => r.driveLink).length;
+          notify('uploaded_drive', `Uploaded ${uploadedCount} reel(s) to Google Drive`);
+        }
       } else {
         notify('process_skipped', 'Could not parse cut data for automated processing');
       }
@@ -164,6 +175,24 @@ async function processVideo({
 
     // Clean up local video file and temp artifacts
     try { fs.unlinkSync(localVideoPath); } catch (_) {}
+
+    // 7. Email results to user (non-blocking — don't fail the pipeline if email fails)
+    if (userEmail) {
+      try {
+        const appUrl = process.env.APP_URL || `http://localhost:${config.port}`;
+        await emailService.sendResultsEmail({
+          to: userEmail,
+          videoId,
+          originalName,
+          videoType,
+          reels: processedReels,
+          cuttingGuide: analysisResult.cuttingGuide,
+          appUrl,
+        });
+      } catch (emailErr) {
+        console.error('[pipeline] Email send failed (non-fatal):', emailErr.message);
+      }
+    }
 
     return {
       videoId,

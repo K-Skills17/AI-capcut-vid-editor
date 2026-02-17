@@ -73,8 +73,8 @@
       return;
     }
 
-    if (file.size > 1024 * 1024 * 1024) {
-      showToast('File too large. Maximum size is 1GB.', 'error');
+    if (file.size > 3072 * 1024 * 1024) {
+      showToast('File too large. Maximum size is 3GB.', 'error');
       return;
     }
 
@@ -170,7 +170,7 @@
       xhr.addEventListener('timeout', () => reject(new Error('Upload timed out')));
 
       xhr.open('POST', '/api/upload');
-      xhr.timeout = 600000; // 10 min timeout
+      xhr.timeout = 1800000; // 30 min timeout for large files
       xhr.send(formData);
     });
   }
@@ -215,6 +215,7 @@
 
   function handleStatusUpdate(data) {
     switch (data.status) {
+      case 'uploading':
       case 'received':
       case 'uploaded':
         setStepStatus(0, 'done');
@@ -242,7 +243,16 @@
       case 'processing':
         setStepStatus(2, 'done');
         setStepStatus(3, 'active');
+        setProgress(85);
+        break;
+      case 'processed':
         setProgress(90);
+        break;
+      case 'uploading_drive':
+        setProgress(92);
+        break;
+      case 'uploaded_drive':
+        setProgress(96);
         break;
       case 'completed':
         setStepStatus(0, 'done');
@@ -274,6 +284,7 @@
         analysis: data.analysis,
         transcript: data.transcript,
         video: data.video,
+        processedReels: data.processedReels,
       });
     } catch (err) {
       showToast('Failed to load results', 'error');
@@ -292,6 +303,22 @@
     const sections = parseReelSections(guide);
 
     let html = '';
+
+    // Show processed reel download links (from Google Drive)
+    const reels = data.processedReels || [];
+    const driveReels = reels.filter((r) => r.status === 'success' && r.driveLink);
+    if (driveReels.length > 0) {
+      html += '<div class="reel-downloads">';
+      html += '<h3>Your Processed Reels</h3>';
+      html += '<div class="reel-links">';
+      driveReels.forEach((r) => {
+        html += `<a href="${escapeHtml(r.driveLink)}" target="_blank" rel="noopener" class="btn btn-primary btn-sm reel-link">
+          <span>&#9654;</span> ${escapeHtml(r.title || 'Reel #' + r.reelId)}
+          ${r.targetDuration ? '<span class="reel-duration">' + r.targetDuration + 's</span>' : ''}
+        </a>`;
+      });
+      html += '</div></div>';
+    }
 
     // Add timeline visualization if we have cut data
     if (data.analysis.cutData && data.video) {
@@ -318,7 +345,10 @@
     });
 
     resultsContent.innerHTML = html;
-    showToast('CapCut guide ready!', 'success');
+    const message = driveReels.length > 0
+      ? `CapCut guide ready! ${driveReels.length} reel(s) uploaded to Google Drive.`
+      : 'CapCut guide ready!';
+    showToast(message, 'success');
   }
 
   function parseReelSections(guide) {
@@ -427,7 +457,7 @@
     clearFile();
     videoTypeSelect.value = '';
     emailInput.value = '';
-    autoProcessCheck.checked = false;
+    autoProcessCheck.checked = true;
     currentVideoId = null;
     resetProgress();
     showSection('upload');

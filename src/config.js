@@ -35,5 +35,20 @@ module.exports = {
   // Minimum free disk space required to start processing (MB)
   minFreeDiskMB: parseInt(process.env.MIN_FREE_DISK_MB, 10) || 2048,
 
+  // Google Drive — upload processed reels for delivery
+  googleDrive: {
+    credentialsJson: process.env.GOOGLE_CREDENTIALS_JSON || '',
+    folderId: process.env.GOOGLE_DRIVE_FOLDER_ID || '',
+  },
+
+  // Email — send results to user via SMTP
+  email: {
+    host: process.env.SMTP_HOST || 'smtp.gmail.com',
+    port: parseInt(process.env.SMTP_PORT, 10) || 587,
+    user: process.env.SMTP_USER || '',
+    pass: process.env.SMTP_PASS || '',
+    from: process.env.SMTP_FROM || process.env.SMTP_USER || '',
+  },
+
   supportedFormats: ['.mp4', '.mov', '.avi', '.mkv'],
 };
