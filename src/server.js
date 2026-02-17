@@ -54,7 +54,7 @@ app.listen(config.port, () => {
   console.log(`  ──────────────────────────────`);
   console.log(`  Server running on http://localhost:${config.port}`);
   console.log(`  Environment: ${config.nodeEnv}`);
-  console.log(`  Supabase: ${config.supabase.url ? 'configured' : 'NOT configured'}`);
+  console.log(`  Supabase URL: ${config.supabase.url || '(not set)'}`);
   console.log(`  OpenAI: ${config.openai.apiKey ? 'configured' : 'NOT configured'}`);
   console.log(`  Anthropic: ${config.anthropic.apiKey ? 'configured' : 'NOT configured'}`);
   console.log();

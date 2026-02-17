@@ -14,9 +14,12 @@ const memStore = {
 
 function isConfigured() {
   if (_configured === null) {
-    _configured = !!(config.supabase.url && config.supabase.serviceKey);
+    const url = (config.supabase.url || '').trim();
+    const key = (config.supabase.serviceKey || '').trim();
+    _configured = !!(url && key && /^https?:\/\/.+/.test(url));
     if (!_configured) {
-      console.log('[supabase] Credentials not set — using in-memory store');
+      console.log('[supabase] Not configured or invalid URL — using in-memory store');
+      if (url) console.log(`[supabase] SUPABASE_URL="${url}" (valid=${/^https?:\/\/.+/.test(url)})`);
     }
   }
   return _configured;
@@ -25,7 +28,13 @@ function isConfigured() {
 function getClient() {
   if (!isConfigured()) return null;
   if (!supabase) {
-    supabase = createClient(config.supabase.url, config.supabase.serviceKey);
+    try {
+      supabase = createClient(config.supabase.url.trim(), config.supabase.serviceKey.trim());
+    } catch (err) {
+      console.error('[supabase] createClient failed, falling back to in-memory:', err.message);
+      _configured = false;
+      return null;
+    }
   }
   return supabase;
 }
