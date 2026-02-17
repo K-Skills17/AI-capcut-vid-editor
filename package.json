@@ -1,0 +1,29 @@
+{
+  "name": "ai-capcut-vid-editor",
+  "version": "1.0.0",
+  "description": "AI-powered video analysis and CapCut Pro cutting guide generator by LK Digital",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "http://local_proxy@127.0.0.1:21166/git/K-Skills17/AI-capcut-vid-editor"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.74.0",
+    "@supabase/supabase-js": "^2.95.3",
+    "cors": "^2.8.6",
+    "dotenv": "^17.3.1",
+    "express": "^5.2.1",
+    "express-rate-limit": "^8.2.1",
+    "multer": "^2.0.2",
+    "openai": "^6.22.0",
+    "pdfkit": "^0.17.2",
+    "uuid": "^13.0.0"
+  }
+}

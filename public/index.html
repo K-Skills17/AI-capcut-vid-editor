@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LK Content Factory - AI CapCut Optimizer</title>
+  <link rel="stylesheet" href="/css/styles.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎬</text></svg>">
+</head>
+<body>
+
+  <div id="toastContainer" class="toast-container"></div>
+
+  <div class="container">
+
+    <!-- Header -->
+    <div class="header">
+      <h1>AI CapCut Optimizer</h1>
+      <p>Upload your video. Get AI-powered cutting instructions for CapCut Pro.</p>
+      <span class="brand-tag">LK Digital Content Factory</span>
+    </div>
+
+    <!-- Upload Section -->
+    <div id="uploadSection">
+      <div class="card">
+        <h2>Upload Video</h2>
+
+        <div class="upload-zone" id="uploadZone">
+          <div class="upload-icon">&#127909;</div>
+          <p>Drag & drop your video here, or click to browse</p>
+          <p class="formats">MP4, MOV, AVI, MKV &mdash; up to 1GB</p>
+          <input type="file" id="fileInput" accept=".mp4,.mov,.avi,.mkv" hidden>
+        </div>
+
+        <div class="file-info" id="fileInfo">
+          <span>&#128196;</span>
+          <span class="name" id="fileName"></span>
+          <span class="size" id="fileSize"></span>
+          <button class="remove-btn" id="removeFile" title="Remove file">&#10005;</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Video Details</h2>
+
+        <div class="form-group">
+          <label for="videoType">Content Type *</label>
+          <select id="videoType">
+            <option value="">Select content type...</option>
+            <option value="wellness">Wellness Tip</option>
+            <option value="testimonial">Testimonial</option>
+            <option value="educational">Educational</option>
+            <option value="product_demo">Product Demo</option>
+            <option value="healthcare">Healthcare Content</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label for="userEmail">Email (optional - to receive results)</label>
+          <input type="email" id="userEmail" placeholder="your@email.com">
+        </div>
+
+        <div class="form-group">
+          <label class="checkbox-group">
+            <input type="checkbox" id="autoProcess">
+            <div>
+              <div class="label-text">Auto-process reels (Phase 2)</div>
+              <div class="label-desc">Automatically cut video into reels using AI recommendations. Requires ffmpeg on server.</div>
+            </div>
+          </label>
+        </div>
+
+        <button class="btn btn-primary" id="submitBtn" disabled>
+          <span>&#9889;</span> Analyze & Generate Cutting Guide
+        </button>
+      </div>
+    </div>
+
+    <!-- Progress Section -->
+    <div class="progress-section" id="progressSection">
+      <div class="card">
+        <h2>Processing Your Video</h2>
+        <p style="color:var(--text-muted);margin-bottom:20px;font-size:0.9rem">
+          This typically takes 2-3 minutes depending on video length.
+        </p>
+
+        <div class="progress-bar-wrap">
+          <div class="progress-bar" id="progressBar"></div>
+        </div>
+
+        <ul class="status-steps">
+          <li>
+            <span class="status-icon">&#9675;</span>
+            <span>Video uploaded to storage</span>
+          </li>
+          <li>
+            <span class="status-icon">&#9675;</span>
+            <span>Transcribing audio with Whisper AI</span>
+          </li>
+          <li>
+            <span class="status-icon">&#9675;</span>
+            <span>AI analyzing content & generating CapCut guide</span>
+          </li>
+          <li>
+            <span class="status-icon">&#9675;</span>
+            <span>CapCut guide ready!</span>
+          </li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Results Section -->
+    <div class="results-section" id="resultsSection">
+      <div class="card">
+        <h2>Your CapCut Cutting Guide</h2>
+
+        <div class="results-actions">
+          <button class="btn btn-secondary btn-sm" onclick="copyFullGuide()">
+            &#128203; Copy Full Guide
+          </button>
+          <button class="btn btn-secondary btn-sm" id="downloadPdf">
+            &#128196; Download PDF
+          </button>
+        </div>
+
+        <div id="resultsContent"></div>
+
+        <div style="margin-top:30px;text-align:center">
+          <button class="btn btn-primary" id="processAnother" style="max-width:320px">
+            &#127909; Process Another Video
+          </button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <script src="/js/app.js"></script>
+</body>
+</html>
