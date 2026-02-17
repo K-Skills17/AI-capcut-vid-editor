@@ -27,6 +27,7 @@
   const resultsSection = document.getElementById('resultsSection');
 
   const progressBar = document.getElementById('progressBar');
+  const statusDetail = document.getElementById('statusDetail');
   const statusSteps = document.querySelectorAll('.status-steps li');
 
   const resultsContent = document.getElementById('resultsContent');
@@ -100,7 +101,7 @@
 
   videoTypeSelect.addEventListener('change', updateSubmitState);
 
-  // --- Submit ---
+  // --- Submit (async upload — returns immediately, then SSE tracks progress) ---
 
   submitBtn.addEventListener('click', async () => {
     if (!selectedFile || !videoTypeSelect.value) return;
@@ -115,11 +116,11 @@
 
     // Switch to progress view
     showSection('progress');
-    setProgress(5);
-    setStepStatus(0, 'active');
+    setProgress(2);
+    setStepActive(0, 'Uploading video to server...');
 
     try {
-      // Upload with progress tracking via XHR
+      // Upload file with progress, get videoId immediately
       const result = await uploadWithProgress(formData);
 
       if (result.error) {
@@ -128,17 +129,16 @@
 
       currentVideoId = result.videoId;
 
-      // If sync response (has analysis), show results directly
-      if (result.analysis) {
-        showResults(result);
-        return;
-      }
+      // File is on the server — mark step 0 done, start polling
+      setStepDone(0);
+      setProgress(20);
+      setDetail('Video received, starting processing...');
 
-      // Otherwise poll for status (async mode)
+      // Start SSE polling for real-time status updates
       pollStatus(result.videoId);
     } catch (err) {
       showToast(err.message || 'Upload failed. Please try again.', 'error');
-      setStepStatus(0, 'error');
+      setStepError(0);
     }
   });
 
@@ -148,8 +148,9 @@
 
       xhr.upload.addEventListener('progress', (e) => {
         if (e.lengthComputable) {
-          const pct = Math.round((e.loaded / e.total) * 20);
+          const pct = Math.round((e.loaded / e.total) * 18) + 2;
           setProgress(pct);
+          setDetail(`Uploading... ${Math.round((e.loaded / e.total) * 100)}%`);
         }
       });
 
@@ -169,13 +170,14 @@
       xhr.addEventListener('error', () => reject(new Error('Network error')));
       xhr.addEventListener('timeout', () => reject(new Error('Upload timed out')));
 
-      xhr.open('POST', '/api/upload');
+      // Use async endpoint — returns videoId immediately, processes in background
+      xhr.open('POST', '/api/upload-async');
       xhr.timeout = 1800000; // 30 min timeout for large files
       xhr.send(formData);
     });
   }
 
-  // --- Status Polling ---
+  // --- Status Polling via SSE ---
 
   function pollStatus(videoId) {
     // Try SSE first
@@ -213,63 +215,84 @@
     }, 2000);
   }
 
+  // Step indices: 0=upload, 1=transcribe, 2=analyze, 3=ffmpeg, 4=drive, 5=done
+
   function handleStatusUpdate(data) {
+    const detail = data.detail || '';
+
     switch (data.status) {
       case 'uploading':
-      case 'received':
-      case 'uploaded':
-        setStepStatus(0, 'done');
-        setStepStatus(1, 'active');
-        setProgress(25);
+        setStepDone(0);
+        setProgress(22);
+        setDetail(detail);
         break;
       case 'transcribing':
-        setStepStatus(0, 'done');
-        setStepStatus(1, 'active');
-        setProgress(40);
+        setStepDone(0);
+        setStepActive(1, detail || 'Extracting audio and transcribing...');
+        setProgress(30);
         break;
       case 'transcribed':
-        setStepStatus(1, 'done');
-        setProgress(50);
+        setStepDone(1);
+        setProgress(48);
+        setDetail(detail || 'Transcription complete');
         break;
       case 'analyzing':
-        setStepStatus(1, 'done');
-        setStepStatus(2, 'active');
-        setProgress(65);
+        setStepDone(1);
+        setStepActive(2, detail || 'AI generating CapCut cutting guide...');
+        setProgress(55);
         break;
       case 'analyzed':
-        setStepStatus(2, 'done');
-        setProgress(80);
+        setStepDone(2);
+        setProgress(70);
+        setDetail(detail || 'AI analysis complete');
         break;
       case 'processing':
-        setStepStatus(2, 'done');
-        setStepStatus(3, 'active');
-        setProgress(85);
+        setStepDone(2);
+        setStepActive(3, detail || 'Cutting reels with FFmpeg...');
+        setProgress(75);
         break;
       case 'processed':
-        setProgress(90);
+        setStepDone(3);
+        setProgress(85);
+        setDetail(detail || 'Reels created');
         break;
       case 'uploading_drive':
-        setProgress(92);
+        setStepDone(3);
+        setStepActive(4, detail || 'Uploading reels to Google Drive...');
+        setProgress(88);
         break;
       case 'uploaded_drive':
-        setProgress(96);
+        setStepDone(4);
+        setProgress(95);
+        setDetail(detail || 'Reels uploaded to Google Drive');
+        break;
+      case 'process_skipped':
+        // ffmpeg/drive skipped — mark both as done (grey)
+        setStepDone(3);
+        setStepDone(4);
+        setProgress(92);
+        setDetail(detail);
         break;
       case 'completed':
-        setStepStatus(0, 'done');
-        setStepStatus(1, 'done');
-        setStepStatus(2, 'done');
-        setStepStatus(3, 'done');
+        // Mark all done
+        for (let i = 0; i <= 5; i++) setStepDone(i);
         setProgress(100);
+        setDetail('All processing complete!');
         if (statusEventSource) statusEventSource.close();
         // Fetch full results
         fetchResults(data.videoId);
         break;
       case 'error':
-        showToast(data.detail || 'Processing failed', 'error');
+        showToast(detail || 'Processing failed', 'error');
+        setDetail(detail);
         if (statusEventSource) statusEventSource.close();
-        // Mark current step as error
+        // Mark current active step as error
         statusSteps.forEach((step) => {
-          if (step.classList.contains('active')) step.classList.replace('active', 'error');
+          if (step.classList.contains('active')) {
+            step.classList.remove('active');
+            step.classList.add('error');
+            step.querySelector('.status-icon').textContent = '\u2717';
+          }
         });
         break;
     }
@@ -383,7 +406,7 @@
     if (!cutData || !cutData.reels || !totalDuration) return '';
 
     let html = '';
-    cutData.reels.forEach((reel, ri) => {
+    cutData.reels.forEach((reel) => {
       const segments = reel.segments || [];
       if (segments.length === 0) return;
 
@@ -475,20 +498,38 @@
     progressBar.style.width = pct + '%';
   }
 
-  function setStepStatus(index, status) {
+  function setDetail(text) {
+    statusDetail.textContent = text;
+  }
+
+  function setStepActive(index, detail) {
     if (index >= statusSteps.length) return;
     const step = statusSteps[index];
-    step.classList.remove('active', 'done', 'error');
-    step.classList.add(status);
+    step.classList.remove('done', 'error');
+    step.classList.add('active');
+    step.querySelector('.status-icon').textContent = '\u23F3';
+    if (detail) setDetail(detail);
+  }
 
-    const icon = step.querySelector('.status-icon');
-    if (status === 'done') icon.textContent = '\u2713';
-    else if (status === 'active') icon.textContent = '\u23F3';
-    else if (status === 'error') icon.textContent = '\u2717';
+  function setStepDone(index) {
+    if (index >= statusSteps.length) return;
+    const step = statusSteps[index];
+    step.classList.remove('active', 'error');
+    step.classList.add('done');
+    step.querySelector('.status-icon').textContent = '\u2713';
+  }
+
+  function setStepError(index) {
+    if (index >= statusSteps.length) return;
+    const step = statusSteps[index];
+    step.classList.remove('active', 'done');
+    step.classList.add('error');
+    step.querySelector('.status-icon').textContent = '\u2717';
   }
 
   function resetProgress() {
     setProgress(0);
+    setDetail('');
     statusSteps.forEach((step) => {
       step.classList.remove('active', 'done', 'error');
       step.querySelector('.status-icon').textContent = '\u25CB';

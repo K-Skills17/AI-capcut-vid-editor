@@ -28,7 +28,7 @@
         <div class="upload-zone" id="uploadZone">
           <div class="upload-icon">&#127909;</div>
           <p>Drag & drop your video here, or click to browse</p>
-          <p class="formats">MP4, MOV, AVI, MKV &mdash; up to 1GB</p>
+          <p class="formats">MP4, MOV, AVI, MKV &mdash; up to 3GB</p>
           <input type="file" id="fileInput" accept=".mp4,.mov,.avi,.mkv" hidden>
         </div>
 
@@ -88,6 +88,8 @@
           <div class="progress-bar" id="progressBar"></div>
         </div>
 
+        <p class="status-detail" id="statusDetail"></p>
+
         <ul class="status-steps">
           <li>
             <span class="status-icon">&#9675;</span>
@@ -103,7 +105,15 @@
           </li>
           <li>
             <span class="status-icon">&#9675;</span>
-            <span>CapCut guide ready!</span>
+            <span>Cutting reels with FFmpeg</span>
+          </li>
+          <li>
+            <span class="status-icon">&#9675;</span>
+            <span>Uploading reels to Google Drive</span>
+          </li>
+          <li>
+            <span class="status-icon">&#9675;</span>
+            <span>All done!</span>
           </li>
         </ul>
       </div>

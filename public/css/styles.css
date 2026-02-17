@@ -293,6 +293,14 @@ select option {
   transition: width 0.5s ease;
 }
 
+.status-detail {
+  color: var(--primary-light);
+  font-size: 0.85rem;
+  min-height: 1.4em;
+  margin-bottom: 16px;
+  transition: opacity 0.3s;
+}
+
 .status-steps {
   list-style: none;
 }
