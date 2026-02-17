@@ -215,6 +215,7 @@
 
   function handleStatusUpdate(data) {
     switch (data.status) {
+      case 'received':
       case 'uploaded':
         setStepStatus(0, 'done');
         setStepStatus(1, 'active');

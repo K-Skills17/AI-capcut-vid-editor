@@ -6,6 +6,11 @@ const config = require('../config');
 
 let openai = null;
 
+// Whisper accepts max 25MB — stay safely under that
+const MAX_CHUNK_BYTES = 24 * 1024 * 1024;
+// 20 minutes per chunk at 128kbps 16kHz ≈ ~18MB, well under limit
+const CHUNK_DURATION_SECS = 20 * 60;
+
 function getOpenAI() {
   if (!openai) {
     if (!config.openai.apiKey) {
@@ -34,7 +39,7 @@ function extractAudio(videoPath) {
       outputPath,
     ];
 
-    execFile(config.ffmpegPath, args, { timeout: 300000 }, (error, stdout, stderr) => {
+    execFile(config.ffmpegPath, args, { timeout: 600000 }, (error, stdout, stderr) => {
       if (error) {
         reject(new Error(`FFmpeg audio extraction failed: ${error.message}`));
         return;
@@ -45,21 +50,61 @@ function extractAudio(videoPath) {
 }
 
 /**
- * Get video duration in seconds using ffprobe.
+ * Split an audio file into chunks using ffmpeg.
+ * Returns array of { path, startOffset } for each chunk.
  */
-function getVideoDuration(videoPath) {
+function splitAudio(audioPath, durationSecs) {
+  const chunkCount = Math.ceil(durationSecs / CHUNK_DURATION_SECS);
+  const chunks = [];
+  const promises = [];
+
+  for (let i = 0; i < chunkCount; i++) {
+    const startOffset = i * CHUNK_DURATION_SECS;
+    const chunkPath = audioPath.replace('.mp3', `_chunk${i}.mp3`);
+    chunks.push({ path: chunkPath, startOffset });
+
+    const promise = new Promise((resolve, reject) => {
+      const args = [
+        '-i', audioPath,
+        '-ss', String(startOffset),
+        '-t', String(CHUNK_DURATION_SECS),
+        '-acodec', 'libmp3lame',
+        '-ab', '128k',
+        '-ar', '16000',
+        '-y',
+        chunkPath,
+      ];
+
+      execFile(config.ffmpegPath, args, { timeout: 120000 }, (error) => {
+        if (error) {
+          reject(new Error(`FFmpeg chunk split failed: ${error.message}`));
+          return;
+        }
+        resolve();
+      });
+    });
+
+    promises.push(promise);
+  }
+
+  return Promise.all(promises).then(() => chunks);
+}
+
+/**
+ * Get video/audio duration in seconds using ffprobe.
+ */
+function getVideoDuration(filePath) {
   return new Promise((resolve, reject) => {
     const ffprobePath = config.ffmpegPath.replace('ffmpeg', 'ffprobe');
     const args = [
       '-v', 'error',
       '-show_entries', 'format=duration',
       '-of', 'default=noprint_wrappers=1:nokey=1',
-      videoPath,
+      filePath,
     ];
 
     execFile(ffprobePath, args, { timeout: 30000 }, (error, stdout) => {
       if (error) {
-        // Fallback: return 0 if ffprobe fails
         resolve(0);
         return;
       }
@@ -70,8 +115,7 @@ function getVideoDuration(videoPath) {
 }
 
 /**
- * Transcribe audio using OpenAI Whisper API.
- * Returns { text, segments } with timestamped data.
+ * Transcribe a single audio file using OpenAI Whisper API.
  */
 async function transcribeAudio(audioPath) {
   const client = getOpenAI();
@@ -89,7 +133,6 @@ async function transcribeAudio(audioPath) {
     text: seg.text.trim(),
   }));
 
-  // Build formatted timestamped transcript
   const timestampedText = segments
     .map((seg) => `[${formatTime(seg.start)} - ${formatTime(seg.end)}] ${seg.text}`)
     .join('\n');
@@ -103,14 +146,68 @@ async function transcribeAudio(audioPath) {
 }
 
 /**
- * Full pipeline: extract audio → transcribe → return structured result.
+ * Transcribe audio that exceeds Whisper's 25MB limit by splitting into chunks.
+ * Timestamps are adjusted so they reflect the original video timeline.
+ */
+async function transcribeChunked(audioPath, durationSecs) {
+  const chunks = await splitAudio(audioPath, durationSecs);
+
+  const allSegments = [];
+  const fullTexts = [];
+  let language = 'pt';
+
+  try {
+    for (const chunk of chunks) {
+      const result = await transcribeAudio(chunk.path);
+      language = result.language;
+      fullTexts.push(result.fullText);
+
+      // Offset timestamps to match original timeline
+      for (const seg of result.segments) {
+        allSegments.push({
+          start: seg.start + chunk.startOffset,
+          end: seg.end + chunk.startOffset,
+          text: seg.text,
+        });
+      }
+    }
+  } finally {
+    // Clean up all chunk files
+    for (const chunk of chunks) {
+      try { fs.unlinkSync(chunk.path); } catch (_) {}
+    }
+  }
+
+  const timestampedText = allSegments
+    .map((seg) => `[${formatTime(seg.start)} - ${formatTime(seg.end)}] ${seg.text}`)
+    .join('\n');
+
+  return {
+    fullText: fullTexts.join(' '),
+    language,
+    segments: allSegments,
+    timestampedText,
+  };
+}
+
+/**
+ * Full pipeline: extract audio → check size → transcribe (chunked if needed) → return result.
  */
 async function processTranscription(videoPath) {
   const audioPath = await extractAudio(videoPath);
   const duration = await getVideoDuration(videoPath);
 
   try {
-    const result = await transcribeAudio(audioPath);
+    const audioSize = fs.statSync(audioPath).size;
+
+    let result;
+    if (audioSize > MAX_CHUNK_BYTES) {
+      const audioDuration = await getVideoDuration(audioPath);
+      result = await transcribeChunked(audioPath, audioDuration || duration);
+    } else {
+      result = await transcribeAudio(audioPath);
+    }
+
     return { ...result, duration };
   } finally {
     // Clean up extracted audio

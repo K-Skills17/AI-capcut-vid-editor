@@ -24,7 +24,7 @@ async function createVideoRecord({ videoUrl, videoType, duration, userEmail }) {
       video_type: videoType,
       duration: duration || null,
       user_email: userEmail || null,
-      status: 'uploading',
+      status: 'received',
     })
     .select()
     .single();

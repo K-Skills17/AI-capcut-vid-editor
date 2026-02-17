@@ -100,7 +100,7 @@ router.post('/upload-async', apiLimiter, upload.single('video'), async (req, res
     });
 
     const videoId = videoRecord.id;
-    statusMap.set(videoId, { status: 'uploaded', detail: 'Video received, starting processing...', updatedAt: Date.now() });
+    statusMap.set(videoId, { status: 'received', detail: 'Video received on server, starting processing...', updatedAt: Date.now() });
 
     // Return immediately
     res.json({ success: true, videoId });

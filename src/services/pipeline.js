@@ -44,7 +44,7 @@ async function processVideo({
       userEmail,
     });
     videoId = videoRecord.id;
-    notify('uploaded', 'Video received, starting processing');
+    notify('received', 'Video received on server, starting processing');
 
     // 3. Transcribe
     await supabase.updateVideoStatus(videoId, 'transcribing');
