@@ -1,13 +1,30 @@
 const { createClient } = require('@supabase/supabase-js');
+const crypto = require('crypto');
 const config = require('../config');
 
 let supabase = null;
+let _configured = null;
+
+// In-memory store used when Supabase is not configured
+const memStore = {
+  videos: new Map(),
+  transcripts: new Map(),
+  analyses: new Map(),
+};
+
+function isConfigured() {
+  if (_configured === null) {
+    _configured = !!(config.supabase.url && config.supabase.serviceKey);
+    if (!_configured) {
+      console.log('[supabase] Credentials not set — using in-memory store');
+    }
+  }
+  return _configured;
+}
 
 function getClient() {
+  if (!isConfigured()) return null;
   if (!supabase) {
-    if (!config.supabase.url || !config.supabase.serviceKey) {
-      throw new Error('Supabase credentials not configured. Set SUPABASE_URL and SUPABASE_SERVICE_KEY in .env');
-    }
     supabase = createClient(config.supabase.url, config.supabase.serviceKey);
   }
   return supabase;
@@ -16,6 +33,21 @@ function getClient() {
 // --- Videos table ---
 
 async function createVideoRecord({ videoUrl, videoType, duration, userEmail }) {
+  if (!isConfigured()) {
+    const id = crypto.randomUUID();
+    const record = {
+      id,
+      video_url: videoUrl,
+      video_type: videoType,
+      duration: duration || null,
+      user_email: userEmail || null,
+      status: 'received',
+      created_at: new Date().toISOString(),
+    };
+    memStore.videos.set(id, record);
+    return record;
+  }
+
   const client = getClient();
   const { data, error } = await client
     .from('videos')
@@ -34,6 +66,12 @@ async function createVideoRecord({ videoUrl, videoType, duration, userEmail }) {
 }
 
 async function updateVideoStatus(videoId, status) {
+  if (!isConfigured()) {
+    const record = memStore.videos.get(videoId);
+    if (record) record.status = status;
+    return;
+  }
+
   const client = getClient();
   const { error } = await client
     .from('videos')
@@ -44,6 +82,12 @@ async function updateVideoStatus(videoId, status) {
 }
 
 async function getVideo(videoId) {
+  if (!isConfigured()) {
+    const record = memStore.videos.get(videoId);
+    if (!record) throw new Error('Video not found');
+    return record;
+  }
+
   const client = getClient();
   const { data, error } = await client
     .from('videos')
@@ -58,6 +102,18 @@ async function getVideo(videoId) {
 // --- Transcripts table ---
 
 async function saveTranscript({ videoId, fullText, timestampedJson, language }) {
+  if (!isConfigured()) {
+    const record = {
+      id: crypto.randomUUID(),
+      video_id: videoId,
+      full_text: fullText,
+      timestamped_json: timestampedJson,
+      language: language || 'pt',
+    };
+    memStore.transcripts.set(videoId, record);
+    return record;
+  }
+
   const client = getClient();
   const { data, error } = await client
     .from('transcripts')
@@ -75,6 +131,10 @@ async function saveTranscript({ videoId, fullText, timestampedJson, language }) 
 }
 
 async function getTranscript(videoId) {
+  if (!isConfigured()) {
+    return memStore.transcripts.get(videoId) || null;
+  }
+
   const client = getClient();
   const { data, error } = await client
     .from('transcripts')
@@ -89,6 +149,18 @@ async function getTranscript(videoId) {
 // --- Analyses table ---
 
 async function saveAnalysis({ videoId, cuttingGuide, reelCount, aiModelUsed }) {
+  if (!isConfigured()) {
+    const record = {
+      id: crypto.randomUUID(),
+      video_id: videoId,
+      cutting_guide: cuttingGuide,
+      reel_count: reelCount || 3,
+      ai_model_used: aiModelUsed,
+    };
+    memStore.analyses.set(videoId, record);
+    return record;
+  }
+
   const client = getClient();
   const { data, error } = await client
     .from('analyses')
@@ -106,11 +178,15 @@ async function saveAnalysis({ videoId, cuttingGuide, reelCount, aiModelUsed }) {
 }
 
 async function getAnalysis(videoId) {
+  if (!isConfigured()) {
+    return memStore.analyses.get(videoId) || null;
+  }
+
   const client = getClient();
   const { data, error } = await client
     .from('analyses')
     .select('*')
-    .eq('video_id', videoId)
+    .eq('id', videoId)
     .single();
 
   if (error) return null;
@@ -120,6 +196,19 @@ async function getAnalysis(videoId) {
 // --- Analytics ---
 
 async function getAnalytics() {
+  if (!isConfigured()) {
+    const videos = Array.from(memStore.videos.values());
+    const typeCounts = {};
+    videos.forEach((v) => {
+      typeCounts[v.video_type] = (typeCounts[v.video_type] || 0) + 1;
+    });
+    return {
+      totalVideos: videos.length,
+      completedVideos: videos.filter((v) => v.status === 'completed').length,
+      videoTypeDistribution: typeCounts,
+    };
+  }
+
   const client = getClient();
 
   const { count: totalVideos } = await client
@@ -146,6 +235,7 @@ async function getAnalytics() {
 }
 
 module.exports = {
+  isConfigured,
   getClient,
   createVideoRecord,
   updateVideoStatus,

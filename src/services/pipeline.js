@@ -55,7 +55,9 @@ async function processVideo({
     // Update duration
     if (transcriptResult.duration) {
       const client = supabase.getClient();
-      await client.from('videos').update({ duration: transcriptResult.duration }).eq('id', videoId);
+      if (client) {
+        await client.from('videos').update({ duration: transcriptResult.duration }).eq('id', videoId);
+      }
     }
 
     const transcript = await supabase.saveTranscript({
