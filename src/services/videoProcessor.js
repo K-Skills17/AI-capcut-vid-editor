@@ -156,9 +156,11 @@ async function processReel(inputVideoPath, reelData, outputDir, options = {}) {
   }
 
   // Step 1: Cut each segment
+  console.log(`[ffmpeg] Reel #${reelId}: cutting ${segments.length} segment(s)`);
   const segmentPaths = [];
   for (let i = 0; i < segments.length; i++) {
     const seg = segments[i];
+    console.log(`[ffmpeg]   Segment ${i}: ${seg.start}s -> ${seg.end}s (${(seg.end - seg.start).toFixed(1)}s)`);
     const segPath = path.join(outputDir, `reel${reelId}_seg${i}.mp4`);
     await cutSegment(inputVideoPath, seg.start, seg.end, segPath);
     segmentPaths.push(segPath);

@@ -142,33 +142,43 @@ Before exporting in CapCut Pro:
 
 ═══════════════════════════════════════════════
 
-ADDITIONALLY, output a machine-readable JSON block at the very end wrapped in <cut-data> tags for automated processing. The JSON should contain:
+CRITICAL REQUIREMENT — You MUST include this at the very end of your response:
+
+Output the exact text "<cut-data>" on its own line, then a valid JSON object, then "</cut-data>" on its own line. This JSON drives our automated video editor. Without it, no reels will be generated.
+
+The "start" and "end" values MUST be numbers in seconds (e.g., 12.5, not "0:12"). Use the timestamps from the transcript to calculate exact seconds.
+
+<cut-data>
 {
   "reels": [
     {
       "id": 1,
-      "title": "...",
-      "strategy": "...",
-      "target_duration_seconds": ...,
+      "title": "Reel title",
+      "strategy": "Why this reel works",
+      "target_duration_seconds": 30,
       "segments": [
-        { "start": seconds_float, "end": seconds_float, "reason": "..." }
+        { "start": 0.0, "end": 15.5, "reason": "Strong opening hook" },
+        { "start": 42.0, "end": 58.0, "reason": "Key message" }
       ],
       "effects": {
-        "captions": true/false,
-        "transitions": ["type1", "type2"],
-        "speed_ramps": [{ "start": seconds, "end": seconds, "speed": multiplier }],
-        "text_overlays": [{ "text": "...", "start": seconds, "end": seconds }],
-        "zoom_effects": [{ "start": seconds, "end": seconds, "scale": multiplier }]
+        "captions": true,
+        "transitions": ["cut"],
+        "speed_ramps": [],
+        "text_overlays": [],
+        "zoom_effects": []
       },
-      "caption_text": "...",
-      "template_style": "..."
+      "caption_text": "Caption for this reel",
+      "template_style": "Dynamic"
     }
   ],
   "platform_recommendations": {
-    "instagram": { "best_reel": 1, "optimal_length": seconds },
-    "tiktok": { "best_reel": 1, "hook_adjustment": "..." }
+    "instagram": { "best_reel": 1, "optimal_length": 30 },
+    "tiktok": { "best_reel": 1, "hook_adjustment": "none" }
   }
-}`;
+}
+</cut-data>
+
+Replace the example values above with real timestamps and data from the transcript. Every reel MUST have at least one segment with numeric start/end seconds.`;
 }
 
 /**
@@ -243,17 +253,98 @@ async function analyzeTranscript({ videoType, duration, timestampedTranscript })
 /**
  * Parse the machine-readable cut data from the analysis output.
  * This enables Phase 2 automated processing.
+ *
+ * Handles multiple AI output formats:
+ *  1. <cut-data>{...}</cut-data>
+ *  2. ```json\n{...}\n``` (markdown code fences)
+ *  3. Raw JSON block containing "reels" key
  */
 function parseCutData(cuttingGuide) {
-  const match = cuttingGuide.match(/<cut-data>([\s\S]*?)<\/cut-data>/);
-  if (!match) return null;
+  if (!cuttingGuide) return null;
 
-  try {
-    return JSON.parse(match[1].trim());
-  } catch (err) {
-    console.error('Failed to parse cut-data JSON:', err.message);
-    return null;
+  // Strategy 1: <cut-data> tags (requested format)
+  const tagMatch = cuttingGuide.match(/<cut-data>\s*([\s\S]*?)\s*<\/cut-data>/);
+  if (tagMatch) {
+    try {
+      const parsed = JSON.parse(tagMatch[1].trim());
+      if (parsed.reels && parsed.reels.length > 0) {
+        console.log(`[parseCutData] Found ${parsed.reels.length} reel(s) via <cut-data> tags`);
+        return parsed;
+      }
+    } catch (err) {
+      console.error('[parseCutData] Found <cut-data> tags but JSON parse failed:', err.message);
+    }
   }
+
+  // Strategy 2: markdown code fences containing "reels"
+  const codeBlockMatches = cuttingGuide.matchAll(/```(?:json)?\s*\n?([\s\S]*?)\n?```/g);
+  for (const m of codeBlockMatches) {
+    const block = m[1].trim();
+    if (block.includes('"reels"')) {
+      try {
+        const parsed = JSON.parse(block);
+        if (parsed.reels && parsed.reels.length > 0) {
+          console.log(`[parseCutData] Found ${parsed.reels.length} reel(s) via markdown code fence`);
+          return parsed;
+        }
+      } catch (err) {
+        console.error('[parseCutData] Found code block with "reels" but JSON parse failed:', err.message);
+      }
+    }
+  }
+
+  // Strategy 3: find the last large JSON object in the text that contains "reels"
+  const jsonMatches = cuttingGuide.matchAll(/\{[\s\S]*?"reels"\s*:\s*\[[\s\S]*?\]\s*[\s\S]*?\}/g);
+  let lastValid = null;
+  for (const m of jsonMatches) {
+    try {
+      // Find the balanced braces — start from the match and find proper end
+      const startIdx = cuttingGuide.indexOf(m[0]);
+      const balanced = extractBalancedJson(cuttingGuide, startIdx);
+      if (balanced) {
+        const parsed = JSON.parse(balanced);
+        if (parsed.reels && parsed.reels.length > 0) {
+          lastValid = parsed;
+        }
+      }
+    } catch {
+      // try next match
+    }
+  }
+  if (lastValid) {
+    console.log(`[parseCutData] Found ${lastValid.reels.length} reel(s) via raw JSON extraction`);
+    return lastValid;
+  }
+
+  console.error('[parseCutData] Could not find cut data in AI output. First 200 chars of end:', cuttingGuide.slice(-200));
+  return null;
+}
+
+/**
+ * Extract a balanced JSON object starting at the given index.
+ */
+function extractBalancedJson(text, startIdx) {
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+
+  for (let i = startIdx; i < text.length; i++) {
+    const ch = text[i];
+
+    if (escape) { escape = false; continue; }
+    if (ch === '\\' && inString) { escape = true; continue; }
+    if (ch === '"') { inString = !inString; continue; }
+    if (inString) continue;
+
+    if (ch === '{') depth++;
+    if (ch === '}') {
+      depth--;
+      if (depth === 0) {
+        return text.substring(startIdx, i + 1);
+      }
+    }
+  }
+  return null;
 }
 
 module.exports = {

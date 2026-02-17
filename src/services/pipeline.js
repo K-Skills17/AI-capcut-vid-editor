@@ -147,15 +147,33 @@ async function processVideo({
 
       const cutData = analysis.parseCutData(analysisResult.cuttingGuide);
       if (cutData) {
+        console.log(`[pipeline] Cut data parsed: ${cutData.reels.length} reel(s) with segments:`,
+          cutData.reels.map((r) => `Reel #${r.id}: ${r.segments?.length || 0} segments`).join(', '));
+
+        // Verify video file still exists before attempting cuts
+        if (!fs.existsSync(localVideoPath)) {
+          throw new Error(`Video file missing before ffmpeg cuts: ${localVideoPath}`);
+        }
+
         reelsOutputDir = path.join(path.dirname(localVideoPath), `reels_${videoId}`);
+        console.log(`[pipeline] Starting ffmpeg cuts: input=${localVideoPath}, output=${reelsOutputDir}`);
+
         processedReels = await videoProcessor.processAllReels(
           localVideoPath,
           cutData,
           reelsOutputDir,
           { scaleVertical: true, skipExpensiveOps: isLargeFile }
         );
+
         const successCount = processedReels.filter((r) => r.status === 'success').length;
-        notify('processed', `Created ${successCount} reel(s)`);
+        const errorCount = processedReels.filter((r) => r.status === 'error').length;
+        console.log(`[pipeline] FFmpeg results: ${successCount} success, ${errorCount} errors`);
+        if (errorCount > 0) {
+          processedReels.filter((r) => r.status === 'error').forEach((r) => {
+            console.error(`[pipeline] Reel #${r.reelId} failed: ${r.error}`);
+          });
+        }
+        notify('processed', `Created ${successCount} reel(s)${errorCount > 0 ? `, ${errorCount} failed` : ''}`);
 
         // 5b. Upload reels to Google Drive (frees local disk)
         if (driveUploader.isConfigured() && successCount > 0) {
@@ -163,10 +181,15 @@ async function processVideo({
           processedReels = await driveUploader.uploadReels(processedReels, videoId);
           const uploadedCount = processedReels.filter((r) => r.driveLink).length;
           notify('uploaded_drive', `Uploaded ${uploadedCount} reel(s) to Google Drive`);
+        } else if (!driveUploader.isConfigured()) {
+          console.log('[pipeline] Google Drive not configured — reels stay on local disk');
         }
       } else {
-        notify('process_skipped', 'Could not parse cut data for automated processing');
+        console.error('[pipeline] parseCutData returned null — autocut skipped. AI output may not contain structured cut data.');
+        notify('process_skipped', 'Could not parse cut data from AI output — try re-processing');
       }
+    } else {
+      console.log('[pipeline] autoProcess=false — skipping Phase 2 cuts');
     }
 
     // 6. Mark completed
