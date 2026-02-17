@@ -37,17 +37,14 @@ async function processVideo({
   };
 
   try {
-    // 1. Upload to Supabase Storage
-    const { publicUrl } = await supabase.uploadVideo(localVideoPath, originalName);
-
-    // 2. Create video record
+    // 1. Create video record (no cloud storage — video is processed locally and discarded)
     const videoRecord = await supabase.createVideoRecord({
-      videoUrl: publicUrl,
+      videoUrl: originalName,
       videoType,
       userEmail,
     });
     videoId = videoRecord.id;
-    notify('uploaded', 'Video uploaded to storage');
+    notify('uploaded', 'Video received, starting processing');
 
     // 3. Transcribe
     await supabase.updateVideoStatus(videoId, 'transcribing');
@@ -117,7 +114,7 @@ async function processVideo({
 
     return {
       videoId,
-      videoUrl: publicUrl,
+      videoUrl: originalName,
       transcript: {
         fullText: transcriptResult.fullText,
         segments: transcriptResult.segments,

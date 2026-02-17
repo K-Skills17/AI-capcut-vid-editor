@@ -1,8 +1,5 @@
 const { createClient } = require('@supabase/supabase-js');
 const config = require('../config');
-const path = require('path');
-const fs = require('fs');
-const { v4: uuidv4 } = require('uuid');
 
 let supabase = null;
 
@@ -14,30 +11,6 @@ function getClient() {
     supabase = createClient(config.supabase.url, config.supabase.serviceKey);
   }
   return supabase;
-}
-
-// --- Storage ---
-
-async function uploadVideo(filePath, originalName) {
-  const client = getClient();
-  const ext = path.extname(originalName);
-  const storagePath = `${uuidv4()}${ext}`;
-  const fileBuffer = fs.readFileSync(filePath);
-
-  const { data, error } = await client.storage
-    .from(config.storageBucket)
-    .upload(storagePath, fileBuffer, {
-      contentType: getMimeType(ext),
-      upsert: false,
-    });
-
-  if (error) throw new Error(`Upload to Supabase failed: ${error.message}`);
-
-  const { data: urlData } = client.storage
-    .from(config.storageBucket)
-    .getPublicUrl(storagePath);
-
-  return { storagePath, publicUrl: urlData.publicUrl };
 }
 
 // --- Videos table ---
@@ -172,21 +145,8 @@ async function getAnalytics() {
   return { totalVideos, completedVideos, videoTypeDistribution: typeCounts };
 }
 
-// --- Helpers ---
-
-function getMimeType(ext) {
-  const map = {
-    '.mp4': 'video/mp4',
-    '.mov': 'video/quicktime',
-    '.avi': 'video/x-msvideo',
-    '.mkv': 'video/x-matroska',
-  };
-  return map[ext.toLowerCase()] || 'video/mp4';
-}
-
 module.exports = {
   getClient,
-  uploadVideo,
   createVideoRecord,
   updateVideoStatus,
   getVideo,

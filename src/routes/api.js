@@ -91,22 +91,21 @@ router.post('/upload-async', apiLimiter, upload.single('video'), async (req, res
       });
     }
 
-    // Upload to Supabase to get video ID immediately
+    // Create video record immediately (no cloud upload)
     const supabaseService = require('../services/supabase');
-    const { publicUrl } = await supabaseService.uploadVideo(req.file.path, req.file.originalname);
     const videoRecord = await supabaseService.createVideoRecord({
-      videoUrl: publicUrl,
+      videoUrl: req.file.originalname,
       videoType,
       userEmail: userEmail || null,
     });
 
     const videoId = videoRecord.id;
-    statusMap.set(videoId, { status: 'uploaded', detail: 'Video uploaded, starting processing...', updatedAt: Date.now() });
+    statusMap.set(videoId, { status: 'uploaded', detail: 'Video received, starting processing...', updatedAt: Date.now() });
 
     // Return immediately
     res.json({ success: true, videoId });
 
-    // Process in background
+    // Process in background (pipeline skips cloud upload, processes locally)
     const shouldAutoProcess = autoProcess === 'true' || autoProcess === true;
     pipeline.processVideo({
       localVideoPath: req.file.path,

@@ -27,5 +27,4 @@ module.exports = {
   ffmpegPath: process.env.FFMPEG_PATH || 'ffmpeg',
 
   supportedFormats: ['.mp4', '.mov', '.avi', '.mkv'],
-  storageBucket: 'videos',
 };

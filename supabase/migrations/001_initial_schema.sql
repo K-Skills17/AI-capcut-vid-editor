@@ -42,5 +42,5 @@ CREATE INDEX IF NOT EXISTS idx_videos_type ON videos(video_type);
 CREATE INDEX IF NOT EXISTS idx_transcripts_video_id ON transcripts(video_id);
 CREATE INDEX IF NOT EXISTS idx_analyses_video_id ON analyses(video_id);
 
--- Storage bucket (run in Supabase dashboard or via API)
--- INSERT INTO storage.buckets (id, name, public) VALUES ('videos', 'videos', true);
+-- NOTE: No storage bucket needed. Videos are processed locally and discarded.
+-- Only text data (transcripts, analyses) is stored in the database.
