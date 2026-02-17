@@ -50,7 +50,7 @@ async function createVideoRecord({ videoUrl, videoType, duration, userEmail }) {
       video_type: videoType,
       duration: duration || null,
       user_email: userEmail || null,
-      status: 'received',
+      status: 'uploading',
       created_at: new Date().toISOString(),
     };
     memStore.videos.set(id, record);
@@ -65,7 +65,7 @@ async function createVideoRecord({ videoUrl, videoType, duration, userEmail }) {
       video_type: videoType,
       duration: duration || null,
       user_email: userEmail || null,
-      status: 'received',
+      status: 'uploading',
     })
     .select()
     .single();
