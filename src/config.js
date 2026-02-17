@@ -23,8 +23,17 @@ module.exports = {
     maxRequests: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS, 10) || 10,
   },
 
-  maxFileSizeMB: parseInt(process.env.MAX_FILE_SIZE_MB, 10) || 1024,
+  maxFileSizeMB: parseInt(process.env.MAX_FILE_SIZE_MB, 10) || 3072,
   ffmpegPath: process.env.FFMPEG_PATH || 'ffmpeg',
+
+  // Timeout for upload routes (default 30 minutes — needed for 3GB+ files on slow connections)
+  uploadTimeoutMs: parseInt(process.env.UPLOAD_TIMEOUT_MS, 10) || 30 * 60 * 1000,
+
+  // Files larger than this skip expensive re-encoding (speed ramps, vertical scaling)
+  largeFileThresholdMB: parseInt(process.env.LARGE_FILE_THRESHOLD_MB, 10) || 1500,
+
+  // Minimum free disk space required to start processing (MB)
+  minFreeDiskMB: parseInt(process.env.MIN_FREE_DISK_MB, 10) || 2048,
 
   supportedFormats: ['.mp4', '.mov', '.avi', '.mkv'],
 };

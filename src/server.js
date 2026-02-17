@@ -49,15 +49,21 @@ app.use((err, req, res, _next) => {
   res.status(500).json({ error: 'Internal server error' });
 });
 
-app.listen(config.port, () => {
+const server = app.listen(config.port, () => {
   console.log(`\n  🎬 LK Digital Content Factory`);
   console.log(`  ──────────────────────────────`);
   console.log(`  Server running on http://localhost:${config.port}`);
   console.log(`  Environment: ${config.nodeEnv}`);
+  console.log(`  Max upload: ${config.maxFileSizeMB}MB`);
+  console.log(`  Upload timeout: ${config.uploadTimeoutMs / 60000} min`);
   console.log(`  Supabase URL: ${config.supabase.url || '(not set)'}`);
   console.log(`  OpenAI: ${config.openai.apiKey ? 'configured' : 'NOT configured'}`);
   console.log(`  Anthropic: ${config.anthropic.apiKey ? 'configured' : 'NOT configured'}`);
   console.log();
 });
+
+// Allow long uploads — Node default is 2 min which kills 3GB transfers
+server.timeout = config.uploadTimeoutMs;
+server.keepAliveTimeout = config.uploadTimeoutMs;
 
 module.exports = app;

@@ -39,7 +39,8 @@ function extractAudio(videoPath) {
       outputPath,
     ];
 
-    execFile(config.ffmpegPath, args, { timeout: 600000 }, (error, stdout, stderr) => {
+    // 30 min — 3GB video audio extraction can take 15+ min
+    execFile(config.ffmpegPath, args, { timeout: 1800000 }, (error, stdout, stderr) => {
       if (error) {
         reject(new Error(`FFmpeg audio extraction failed: ${error.message}`));
         return;
@@ -75,7 +76,8 @@ function splitAudio(audioPath, durationSecs) {
         chunkPath,
       ];
 
-      execFile(config.ffmpegPath, args, { timeout: 120000 }, (error) => {
+      // 5 min per chunk (large files produce longer chunks)
+      execFile(config.ffmpegPath, args, { timeout: 300000 }, (error) => {
         if (error) {
           reject(new Error(`FFmpeg chunk split failed: ${error.message}`));
           return;
@@ -103,7 +105,8 @@ function getVideoDuration(filePath) {
       filePath,
     ];
 
-    execFile(ffprobePath, args, { timeout: 30000 }, (error, stdout) => {
+    // 60s — large files can be slow to probe
+    execFile(ffprobePath, args, { timeout: 60000 }, (error, stdout) => {
       if (error) {
         resolve(0);
         return;

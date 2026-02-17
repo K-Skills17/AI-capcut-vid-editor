@@ -5,10 +5,38 @@
 
 const path = require('path');
 const fs = require('fs');
+const { execSync } = require('child_process');
+const config = require('../config');
 const supabase = require('./supabase');
 const transcription = require('./transcription');
 const analysis = require('./analysis');
 const videoProcessor = require('./videoProcessor');
+
+/**
+ * Get available disk space in MB for the given path.
+ */
+function getFreeDiskMB(dirPath) {
+  try {
+    // df outputs 1K blocks available
+    const output = execSync(`df -k "${path.dirname(dirPath)}" | tail -1`, { encoding: 'utf8' });
+    const parts = output.trim().split(/\s+/);
+    const availKB = parseInt(parts[3], 10);
+    return Math.floor(availKB / 1024);
+  } catch {
+    return Infinity; // can't check — don't block processing
+  }
+}
+
+/**
+ * Recursively remove a directory and its contents.
+ */
+function cleanupDir(dirPath) {
+  try {
+    if (fs.existsSync(dirPath)) {
+      fs.rmSync(dirPath, { recursive: true, force: true });
+    }
+  } catch (_) {}
+}
 
 /**
  * Process a video through the full pipeline.
@@ -31,12 +59,31 @@ async function processVideo({
   onStatus,
 }) {
   let videoId = null;
+  let reelsOutputDir = null;
 
   const notify = (status, detail) => {
     if (onStatus && videoId) onStatus(videoId, status, detail);
   };
 
   try {
+    // 0. Check disk space before processing
+    const fileSizeMB = Math.ceil(fs.statSync(localVideoPath).size / (1024 * 1024));
+    const freeDiskMB = getFreeDiskMB(localVideoPath);
+    // Need ~3x file size for intermediates (audio + segments + reels)
+    const requiredMB = Math.max(config.minFreeDiskMB, fileSizeMB * 3);
+
+    if (freeDiskMB < requiredMB) {
+      throw new Error(
+        `Insufficient disk space: ${freeDiskMB}MB available, ~${requiredMB}MB required ` +
+        `for a ${fileSizeMB}MB video. Free up space or reduce file size.`
+      );
+    }
+
+    const isLargeFile = fileSizeMB > config.largeFileThresholdMB;
+    if (isLargeFile) {
+      console.log(`  Large file detected (${fileSizeMB}MB > ${config.largeFileThresholdMB}MB threshold) — skipping expensive re-encoding`);
+    }
+
     // 1. Create video record (no cloud storage — video is processed locally and discarded)
     const videoRecord = await supabase.createVideoRecord({
       videoUrl: originalName,
@@ -44,7 +91,7 @@ async function processVideo({
       userEmail,
     });
     videoId = videoRecord.id;
-    notify('received', 'Video received on server, starting processing');
+    notify('uploading', `Video received (${fileSizeMB}MB), starting processing`);
 
     // 3. Transcribe
     await supabase.updateVideoStatus(videoId, 'transcribing');
@@ -90,16 +137,17 @@ async function processVideo({
     let processedReels = null;
     if (autoProcess) {
       await supabase.updateVideoStatus(videoId, 'processing');
-      notify('processing', 'Automatically cutting video into reels...');
+      const modeNote = isLargeFile ? ' (large-file mode: skip re-encoding)' : '';
+      notify('processing', `Automatically cutting video into reels...${modeNote}`);
 
       const cutData = analysis.parseCutData(analysisResult.cuttingGuide);
       if (cutData) {
-        const outputDir = path.join(path.dirname(localVideoPath), `reels_${videoId}`);
+        reelsOutputDir = path.join(path.dirname(localVideoPath), `reels_${videoId}`);
         processedReels = await videoProcessor.processAllReels(
           localVideoPath,
           cutData,
-          outputDir,
-          { scaleVertical: true }
+          reelsOutputDir,
+          { scaleVertical: true, skipExpensiveOps: isLargeFile }
         );
         notify('processed', `Created ${processedReels.filter((r) => r.status === 'success').length} reel(s)`);
       } else {
@@ -111,7 +159,7 @@ async function processVideo({
     await supabase.updateVideoStatus(videoId, 'completed');
     notify('completed', 'All processing complete');
 
-    // Clean up local video file
+    // Clean up local video file and temp artifacts
     try { fs.unlinkSync(localVideoPath); } catch (_) {}
 
     return {
@@ -127,6 +175,7 @@ async function processVideo({
         aiModelUsed: analysisResult.aiModelUsed,
       },
       processedReels,
+      largeFileMode: isLargeFile,
     };
   } catch (err) {
     // Update status to error
@@ -137,8 +186,13 @@ async function processVideo({
       } catch (_) {}
     }
 
-    // Clean up local file on error
+    // Clean up all temp files on error
     try { fs.unlinkSync(localVideoPath); } catch (_) {}
+    if (reelsOutputDir) cleanupDir(reelsOutputDir);
+
+    // Also clean any leftover .mp3 audio from transcription
+    const audioPath = localVideoPath.replace(path.extname(localVideoPath), '.mp3');
+    try { fs.unlinkSync(audioPath); } catch (_) {}
 
     throw err;
   }

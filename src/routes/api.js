@@ -6,14 +6,22 @@ const { apiLimiter } = require('../middleware/rateLimiter');
 const pipeline = require('../services/pipeline');
 const supabase = require('../services/supabase');
 const analysis = require('../services/analysis');
+const config = require('../config');
 const { generateGuidePDF } = require('../utils/pdfGenerator');
 
 // In-memory status tracking for SSE (Server-Sent Events)
 const statusMap = new Map();
 
+// Middleware: extend timeout for upload routes (default 30 min for large files)
+function uploadTimeout(req, res, next) {
+  req.setTimeout(config.uploadTimeoutMs);
+  res.setTimeout(config.uploadTimeoutMs);
+  next();
+}
+
 // --- Upload & Process ---
 
-router.post('/upload', apiLimiter, upload.single('video'), async (req, res) => {
+router.post('/upload', apiLimiter, uploadTimeout, upload.single('video'), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'No video file uploaded' });
@@ -73,7 +81,7 @@ router.post('/upload', apiLimiter, upload.single('video'), async (req, res) => {
 
 // --- Start processing asynchronously (returns immediately with video ID) ---
 
-router.post('/upload-async', apiLimiter, upload.single('video'), async (req, res) => {
+router.post('/upload-async', apiLimiter, uploadTimeout, upload.single('video'), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'No video file uploaded' });

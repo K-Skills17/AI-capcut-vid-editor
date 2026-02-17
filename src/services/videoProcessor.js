@@ -31,7 +31,8 @@ function cutSegment(inputPath, startSec, endSec, outputPath) {
       outputPath,
     ];
 
-    execFile(config.ffmpegPath, args, { timeout: 120000 }, (error) => {
+    // 10 min — stream-copy is fast but large files need time to seek
+    execFile(config.ffmpegPath, args, { timeout: 600000 }, (error) => {
       if (error) {
         reject(new Error(`Failed to cut segment ${startSec}-${endSec}: ${error.message}`));
         return;
@@ -62,7 +63,8 @@ function concatenateSegments(segmentPaths, outputPath) {
       outputPath,
     ];
 
-    execFile(config.ffmpegPath, args, { timeout: 300000 }, (error) => {
+    // 15 min for large concatenations
+    execFile(config.ffmpegPath, args, { timeout: 900000 }, (error) => {
       // Clean up list file
       try { fs.unlinkSync(listPath); } catch (_) {}
 
@@ -94,7 +96,8 @@ function applySpeedRamp(inputPath, speed, outputPath) {
       outputPath,
     ];
 
-    execFile(config.ffmpegPath, args, { timeout: 300000 }, (error) => {
+    // 30 min — speed ramp re-encodes the entire video
+    execFile(config.ffmpegPath, args, { timeout: 1800000 }, (error) => {
       if (error) {
         reject(new Error(`Failed to apply speed ramp: ${error.message}`));
         return;
@@ -119,7 +122,8 @@ function scaleToVertical(inputPath, outputPath) {
       outputPath,
     ];
 
-    execFile(config.ffmpegPath, args, { timeout: 300000 }, (error) => {
+    // 30 min — vertical scaling re-encodes the full video
+    execFile(config.ffmpegPath, args, { timeout: 1800000 }, (error) => {
       if (error) {
         reject(new Error(`Failed to scale video: ${error.message}`));
         return;
@@ -138,7 +142,7 @@ function scaleToVertical(inputPath, outputPath) {
  * @returns {object} Result with outputPath and metadata
  */
 async function processReel(inputVideoPath, reelData, outputDir, options = {}) {
-  const { scaleVertical = false } = options;
+  const { scaleVertical = false, skipExpensiveOps = false } = options;
   const reelId = reelData.id || 1;
   const segments = reelData.segments || [];
 
@@ -168,21 +172,25 @@ async function processReel(inputVideoPath, reelData, outputDir, options = {}) {
     await concatenateSegments(segmentPaths, concatPath);
   }
 
-  // Step 3: Apply speed ramps if specified
+  // Step 3: Apply speed ramps if specified (skipped for large files — too expensive)
   let currentPath = concatPath;
   const speedRamps = reelData.effects?.speed_ramps || [];
-  if (speedRamps.length > 0) {
+  if (speedRamps.length > 0 && !skipExpensiveOps) {
     // Apply first speed ramp to whole clip (simplified; per-segment ramps need more complex pipeline)
     const speedPath = path.join(outputDir, `reel${reelId}_speed.mp4`);
     await applySpeedRamp(currentPath, speedRamps[0].speed, speedPath);
     currentPath = speedPath;
+  } else if (speedRamps.length > 0 && skipExpensiveOps) {
+    console.log(`  Reel #${reelId}: skipping speed ramp (large file mode)`);
   }
 
-  // Step 4: Scale to vertical if requested
-  if (scaleVertical) {
+  // Step 4: Scale to vertical if requested (skipped for large files — full re-encode)
+  if (scaleVertical && !skipExpensiveOps) {
     const verticalPath = path.join(outputDir, `reel${reelId}_vertical.mp4`);
     await scaleToVertical(currentPath, verticalPath);
     currentPath = verticalPath;
+  } else if (scaleVertical && skipExpensiveOps) {
+    console.log(`  Reel #${reelId}: skipping vertical scaling (large file mode)`);
   }
 
   // Step 5: Final output
