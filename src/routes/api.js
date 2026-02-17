@@ -113,7 +113,7 @@ router.post('/upload-async', apiLimiter, uploadTimeout, upload.single('video'), 
     // Return immediately
     res.json({ success: true, videoId });
 
-    // Process in background (pipeline skips cloud upload, processes locally)
+    // Process in background — pass existing videoId so pipeline doesn't create a duplicate
     const shouldAutoProcess = autoProcess === 'true' || autoProcess === true;
     pipeline.processVideo({
       localVideoPath: req.file.path,
@@ -121,6 +121,7 @@ router.post('/upload-async', apiLimiter, uploadTimeout, upload.single('video'), 
       videoType,
       userEmail: userEmail || null,
       autoProcess: shouldAutoProcess,
+      existingVideoId: videoId,
       onStatus: (vid, status, detail) => {
         statusMap.set(vid, { status, detail, updatedAt: Date.now() });
       },

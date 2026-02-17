@@ -56,9 +56,10 @@ async function processVideo({
   videoType,
   userEmail,
   autoProcess = false,
+  existingVideoId = null,
   onStatus,
 }) {
-  let videoId = null;
+  let videoId = existingVideoId;
   let reelsOutputDir = null;
 
   const notify = (status, detail) => {
@@ -84,13 +85,15 @@ async function processVideo({
       console.log(`  Large file detected (${fileSizeMB}MB > ${config.largeFileThresholdMB}MB threshold) — skipping expensive re-encoding`);
     }
 
-    // 1. Create video record (no cloud storage — video is processed locally and discarded)
-    const videoRecord = await supabase.createVideoRecord({
-      videoUrl: originalName,
-      videoType,
-      userEmail,
-    });
-    videoId = videoRecord.id;
+    // 1. Create video record if not already created (async route pre-creates it)
+    if (!videoId) {
+      const videoRecord = await supabase.createVideoRecord({
+        videoUrl: originalName,
+        videoType,
+        userEmail,
+      });
+      videoId = videoRecord.id;
+    }
     notify('uploading', `Video received (${fileSizeMB}MB), starting processing`);
 
     // 3. Transcribe

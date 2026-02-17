@@ -195,7 +195,7 @@ async function getAnalysis(videoId) {
   const { data, error } = await client
     .from('analyses')
     .select('*')
-    .eq('id', videoId)
+    .eq('video_id', videoId)
     .single();
 
   if (error) return null;
