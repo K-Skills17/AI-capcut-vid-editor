@@ -298,10 +298,28 @@
     }
   }
 
-  async function fetchResults(videoId) {
+  async function fetchResults(videoId, retries) {
+    retries = retries || 0;
     try {
       const res = await fetch(`/api/results/${videoId}`);
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        // If analysis isn't ready yet and we haven't retried too many times,
+        // wait and retry — the pipeline may still be flushing to the DB
+        if (res.status === 404 && retries < 3) {
+          await new Promise((r) => setTimeout(r, 1500));
+          return fetchResults(videoId, retries + 1);
+        }
+        throw new Error(errData.error || `Server returned ${res.status}`);
+      }
+
       const data = await res.json();
+
+      if (!data.analysis || !data.analysis.cuttingGuide) {
+        throw new Error('Results are incomplete — analysis data is missing');
+      }
+
       showResults({
         videoId,
         analysis: data.analysis,
@@ -310,7 +328,8 @@
         processedReels: data.processedReels,
       });
     } catch (err) {
-      showToast('Failed to load results', 'error');
+      console.error('fetchResults error:', err);
+      showToast(err.message || 'Failed to load results', 'error');
     }
   }
 
