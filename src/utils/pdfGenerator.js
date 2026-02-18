@@ -2,9 +2,17 @@ const PDFDocument = require('pdfkit');
 
 /**
  * Generate a PDF from the CapCut cutting guide text.
- * Returns a readable stream.
+ *
+ * The caller must pipe the returned doc BEFORE content is written,
+ * so we accept an optional writable stream and pipe internally
+ * to guarantee correct ordering (pipe before doc.end()).
+ *
+ * @param {string} cuttingGuide - The cutting guide text
+ * @param {object} metadata - Video metadata
+ * @param {import('stream').Writable} [outputStream] - Writable stream to pipe PDF into
+ * @returns {PDFDocument}
  */
-function generateGuidePDF(cuttingGuide, metadata = {}) {
+function generateGuidePDF(cuttingGuide, metadata = {}, outputStream) {
   const doc = new PDFDocument({
     size: 'A4',
     margin: 50,
@@ -13,6 +21,11 @@ function generateGuidePDF(cuttingGuide, metadata = {}) {
       Author: 'LK Digital Content Factory',
     },
   });
+
+  // Pipe BEFORE writing any content so the stream receives all data
+  if (outputStream) {
+    doc.pipe(outputStream);
+  }
 
   // Header
   doc.fontSize(20).font('Helvetica-Bold')

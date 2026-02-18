@@ -97,7 +97,10 @@ function splitAudio(audioPath, durationSecs) {
  */
 function getVideoDuration(filePath) {
   return new Promise((resolve, reject) => {
-    const ffprobePath = config.ffmpegPath.replace('ffmpeg', 'ffprobe');
+    // Replace only the basename to avoid mangling paths like /opt/ffmpeg/bin/ffmpeg
+    const dir = path.dirname(config.ffmpegPath);
+    const base = path.basename(config.ffmpegPath).replace('ffmpeg', 'ffprobe');
+    const ffprobePath = dir === '.' ? base : path.join(dir, base);
     const args = [
       '-v', 'error',
       '-show_entries', 'format=duration',

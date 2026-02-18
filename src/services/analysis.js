@@ -189,7 +189,7 @@ async function analyzeWithClaude({ videoType, duration, timestampedTranscript })
   const prompt = buildPrompt({ videoType, duration, timestampedTranscript });
 
   const response = await client.messages.create({
-    model: 'claude-sonnet-4-5-20250929',
+    model: 'claude-sonnet-4-5-20250514',
     max_tokens: 8000,
     messages: [
       {
@@ -204,7 +204,7 @@ async function analyzeWithClaude({ videoType, duration, timestampedTranscript })
     .map((block) => block.text)
     .join('\n');
 
-  return { cuttingGuide: text, aiModelUsed: 'claude-sonnet-4-5-20250929' };
+  return { cuttingGuide: text, aiModelUsed: 'claude-sonnet-4-5-20250514' };
 }
 
 /**

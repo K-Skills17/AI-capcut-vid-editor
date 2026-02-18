@@ -150,16 +150,46 @@ async function processReel(inputVideoPath, reelData, outputDir, options = {}) {
     throw new Error(`Reel #${reelId} has no segments to process`);
   }
 
+  // Validate and sanitize segment timestamps
+  const validSegments = [];
+  for (let i = 0; i < segments.length; i++) {
+    const seg = segments[i];
+    const start = Number(seg.start);
+    const end = Number(seg.end);
+
+    if (isNaN(start) || isNaN(end)) {
+      console.warn(`[ffmpeg] Reel #${reelId} segment ${i}: non-numeric timestamps (start=${seg.start}, end=${seg.end}) — skipping`);
+      continue;
+    }
+    if (start < 0 || end < 0) {
+      console.warn(`[ffmpeg] Reel #${reelId} segment ${i}: negative timestamp (${start}s-${end}s) — skipping`);
+      continue;
+    }
+    if (end <= start) {
+      console.warn(`[ffmpeg] Reel #${reelId} segment ${i}: end <= start (${start}s-${end}s) — skipping`);
+      continue;
+    }
+    if (end - start < 0.5) {
+      console.warn(`[ffmpeg] Reel #${reelId} segment ${i}: too short (${(end - start).toFixed(1)}s) — skipping`);
+      continue;
+    }
+    validSegments.push({ start, end, reason: seg.reason });
+  }
+
+  if (validSegments.length === 0) {
+    throw new Error(`Reel #${reelId}: all segments had invalid timestamps`);
+  }
+
   // Ensure output directory exists
   if (!fs.existsSync(outputDir)) {
     fs.mkdirSync(outputDir, { recursive: true });
   }
 
-  // Step 1: Cut each segment
-  console.log(`[ffmpeg] Reel #${reelId}: cutting ${segments.length} segment(s)`);
+  // Step 1: Cut each segment (using validated segments)
+  console.log(`[ffmpeg] Reel #${reelId}: cutting ${validSegments.length} segment(s)`);
   const segmentPaths = [];
-  for (let i = 0; i < segments.length; i++) {
-    const seg = segments[i];
+  for (let i = 0; i < validSegments.length; i++) {
+    const seg = validSegments[i];
     console.log(`[ffmpeg]   Segment ${i}: ${seg.start}s -> ${seg.end}s (${(seg.end - seg.start).toFixed(1)}s)`);
     const segPath = path.join(outputDir, `reel${reelId}_seg${i}.mp4`);
     await cutSegment(inputVideoPath, seg.start, seg.end, segPath);
@@ -215,7 +245,7 @@ async function processReel(inputVideoPath, reelData, outputDir, options = {}) {
     title: reelData.title,
     outputPath: finalPath,
     targetDuration: reelData.target_duration_seconds,
-    segmentCount: segments.length,
+    segmentCount: validSegments.length,
   };
 }
 

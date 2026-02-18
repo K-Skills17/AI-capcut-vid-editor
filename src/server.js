@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
+const { execFileSync } = require('child_process');
 const config = require('./config');
 const apiRoutes = require('./routes/api');
 
@@ -9,9 +10,19 @@ const app = express();
 
 // Ensure required directories exist
 const uploadsDir = path.join(__dirname, '../uploads');
-const tempDir = path.join(__dirname, '../temp');
+const reelsDir = path.join(__dirname, '../uploads/reels');
 if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
-if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
+if (!fs.existsSync(reelsDir)) fs.mkdirSync(reelsDir, { recursive: true });
+
+// Verify ffmpeg is available at startup
+try {
+  const version = execFileSync(config.ffmpegPath, ['-version'], { timeout: 5000, encoding: 'utf8' });
+  const firstLine = version.split('\n')[0];
+  console.log(`  FFmpeg: ${firstLine}`);
+} catch (err) {
+  console.error(`  WARNING: ffmpeg not found at "${config.ffmpegPath}". Video processing will fail.`);
+  console.error(`  Install ffmpeg or set FFMPEG_PATH in .env`);
+}
 
 // Middleware
 app.use(cors());
@@ -59,6 +70,7 @@ const server = app.listen(config.port, () => {
   console.log(`  Supabase URL: ${config.supabase.url || '(not set)'}`);
   console.log(`  OpenAI: ${config.openai.apiKey ? 'configured' : 'NOT configured'}`);
   console.log(`  Anthropic: ${config.anthropic.apiKey ? 'configured' : 'NOT configured'}`);
+  console.log(`  Google Drive: ${config.googleDrive.credentialsJson && config.googleDrive.folderId ? 'configured' : 'NOT configured (reels served locally)'}`);
   console.log();
 });
 

@@ -1,11 +1,14 @@
 const express = require('express');
 const path = require('path');
+const fs = require('fs');
 const router = express.Router();
 const upload = require('../middleware/upload');
 const { apiLimiter } = require('../middleware/rateLimiter');
 const pipeline = require('../services/pipeline');
 const supabase = require('../services/supabase');
 const analysis = require('../services/analysis');
+const videoProcessor = require('../services/videoProcessor');
+const driveUploader = require('../services/driveUploader');
 const config = require('../config');
 const { generateGuidePDF } = require('../utils/pdfGenerator');
 
@@ -14,6 +17,22 @@ const statusMap = new Map();
 
 // Store processed reel results (Drive links) keyed by videoId
 const reelsMap = new Map();
+
+// TTL cleanup: remove entries older than 2 hours to prevent memory leaks
+const STATUS_TTL_MS = 2 * 60 * 60 * 1000;
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, val] of statusMap) {
+    if (now - val.updatedAt > STATUS_TTL_MS) {
+      statusMap.delete(key);
+    }
+  }
+  for (const [key, val] of reelsMap) {
+    if (now - (val._storedAt || 0) > STATUS_TTL_MS) {
+      reelsMap.delete(key);
+    }
+  }
+}, 10 * 60 * 1000); // check every 10 minutes
 
 // Middleware: extend timeout for upload routes (default 30 min for large files)
 function uploadTimeout(req, res, next) {
@@ -63,6 +82,7 @@ router.post('/upload', apiLimiter, uploadTimeout, upload.single('video'), async 
 
     // Store reel results for later retrieval by the results endpoint
     if (result.processedReels) {
+      result.processedReels._storedAt = Date.now();
       reelsMap.set(result.videoId, result.processedReels);
     }
 
@@ -135,6 +155,7 @@ router.post('/upload-async', apiLimiter, uploadTimeout, upload.single('video'), 
       },
     }).then((result) => {
       if (result.processedReels) {
+        result.processedReels._storedAt = Date.now();
         reelsMap.set(videoId, result.processedReels);
       }
     }).catch((err) => {
@@ -249,14 +270,14 @@ router.get('/results/:videoId/pdf', async (req, res) => {
       return res.status(404).json({ error: 'Analysis not yet available' });
     }
 
-    const doc = generateGuidePDF(analysisData.cutting_guide, {
-      videoType: video.video_type,
-      duration: video.duration,
-    });
-
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="capcut-guide-${videoId}.pdf"`);
-    doc.pipe(res);
+
+    // Pass res as outputStream so pipe happens before content is written
+    generateGuidePDF(analysisData.cutting_guide, {
+      videoType: video.video_type,
+      duration: video.duration,
+    }, res);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -267,6 +288,7 @@ router.get('/results/:videoId/pdf', async (req, res) => {
 router.post('/process/:videoId', apiLimiter, async (req, res) => {
   try {
     const { videoId } = req.params;
+    const video = await supabase.getVideo(videoId);
     const analysisData = await supabase.getAnalysis(videoId);
 
     if (!analysisData) {
@@ -280,15 +302,99 @@ router.post('/process/:videoId', apiLimiter, async (req, res) => {
       });
     }
 
+    // Check if a local video file still exists for this videoId
+    const uploadsDir = path.join(__dirname, '../../uploads');
+    const possibleExts = ['.mp4', '.mov', '.avi', '.mkv'];
+    let localVideoPath = null;
+
+    // Search uploads dir for a file matching this video's original name or UUID
+    try {
+      const files = fs.readdirSync(uploadsDir);
+      for (const file of files) {
+        const ext = path.extname(file).toLowerCase();
+        if (possibleExts.includes(ext)) {
+          const fullPath = path.join(uploadsDir, file);
+          // Check if file is associated with this video (match by stat time or name)
+          if (file.includes(videoId)) {
+            localVideoPath = fullPath;
+            break;
+          }
+        }
+      }
+    } catch (_) {}
+
+    if (!localVideoPath) {
+      // No local file — return cut data only (original file was cleaned up)
+      return res.json({
+        success: true,
+        message: 'Cut data available but original video has been cleaned up. Re-upload to process reels.',
+        cutData,
+        reprocessable: false,
+      });
+    }
+
+    // Actually trigger Phase 2 processing
+    const reelsOutputDir = path.join(uploadsDir, 'reels', videoId);
+    await supabase.updateVideoStatus(videoId, 'processing');
+    statusMap.set(videoId, { status: 'processing', detail: 'Cutting reels with FFmpeg...', updatedAt: Date.now() });
+
+    const processedReels = await videoProcessor.processAllReels(
+      localVideoPath,
+      cutData,
+      reelsOutputDir,
+      { scaleVertical: true, skipExpensiveOps: false }
+    );
+
+    const successCount = processedReels.filter((r) => r.status === 'success').length;
+
+    // Upload to Drive if configured
+    let finalReels = processedReels;
+    if (driveUploader.isConfigured() && successCount > 0) {
+      finalReels = await driveUploader.uploadReels(processedReels, videoId);
+    } else if (successCount > 0) {
+      // Add local URLs for serving
+      finalReels = processedReels.map((reel) => {
+        if (reel.status !== 'success' || !reel.outputPath) return reel;
+        return {
+          ...reel,
+          localUrl: `/api/reels/${videoId}/${path.basename(reel.outputPath)}`,
+        };
+      });
+    }
+
+    finalReels._storedAt = Date.now();
+    reelsMap.set(videoId, finalReels);
+    await supabase.updateVideoStatus(videoId, 'completed');
+    statusMap.set(videoId, { status: 'completed', detail: `Created ${successCount} reel(s)`, updatedAt: Date.now() });
+
     res.json({
       success: true,
-      message: 'Automated processing data available',
+      message: `Processed ${successCount} reel(s)`,
       cutData,
-      note: 'Use the cutData with the video processor to generate reels automatically.',
+      processedReels: finalReels,
+      reprocessable: true,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// --- Serve locally-stored reels (when Google Drive is not configured) ---
+
+router.get('/reels/:videoId/:filename', (req, res) => {
+  const { videoId, filename } = req.params;
+
+  // Sanitize filename to prevent path traversal
+  const safeName = path.basename(filename);
+  const filePath = path.join(__dirname, '../../uploads/reels', videoId, safeName);
+
+  if (!fs.existsSync(filePath)) {
+    return res.status(404).json({ error: 'Reel not found' });
+  }
+
+  res.setHeader('Content-Type', 'video/mp4');
+  res.setHeader('Content-Disposition', `inline; filename="${safeName}"`);
+  fs.createReadStream(filePath).pipe(res);
 });
 
 // --- Analytics ---
