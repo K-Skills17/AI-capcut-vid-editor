@@ -94,25 +94,41 @@ async function uploadReels(reels, videoId) {
       continue;
     }
 
-    try {
-      const fileName = `reel${reel.reelId}_${videoId}.mp4`;
-      console.log(`[drive] Uploading ${fileName}...`);
+    const fileName = `reel${reel.reelId}_${videoId}.mp4`;
+    let uploaded = false;
 
-      const driveResult = await uploadFile(reel.outputPath, fileName);
+    // Retry up to 3 times with exponential backoff for transient network errors
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        console.log(`[drive] Uploading ${fileName}... (attempt ${attempt})`);
 
-      results.push({
-        ...reel,
-        driveLink: driveResult.webViewLink,
-        driveDownloadLink: driveResult.webContentLink,
-        driveFileId: driveResult.fileId,
-      });
+        const driveResult = await uploadFile(reel.outputPath, fileName);
 
-      // Delete local file after successful upload to free disk
-      try { fs.unlinkSync(reel.outputPath); } catch (_) {}
-      console.log(`[drive] Uploaded ${fileName} -> ${driveResult.webViewLink}`);
-    } catch (err) {
-      console.error(`[drive] Failed to upload reel #${reel.reelId}:`, err.message);
-      results.push({ ...reel, driveError: err.message });
+        results.push({
+          ...reel,
+          driveLink: driveResult.webViewLink,
+          driveDownloadLink: driveResult.webContentLink,
+          driveFileId: driveResult.fileId,
+        });
+
+        // Delete local file after successful upload to free disk
+        try { fs.unlinkSync(reel.outputPath); } catch (_) {}
+        console.log(`[drive] Uploaded ${fileName} -> ${driveResult.webViewLink}`);
+        uploaded = true;
+        break;
+      } catch (err) {
+        console.error(`[drive] Attempt ${attempt} failed for reel #${reel.reelId}:`, err.message);
+        if (attempt < 3) {
+          const waitMs = attempt * 2000;
+          console.log(`[drive] Retrying in ${waitMs / 1000}s...`);
+          await new Promise((resolve) => setTimeout(resolve, waitMs));
+        }
+      }
+    }
+
+    if (!uploaded) {
+      console.error(`[drive] All 3 attempts failed for reel #${reel.reelId} — keeping local file`);
+      results.push({ ...reel, driveError: 'Upload failed after 3 attempts' });
     }
   }
 

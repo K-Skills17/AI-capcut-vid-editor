@@ -64,8 +64,8 @@ async function processVideo({
   let videoId = existingVideoId;
   let reelsOutputDir = null;
 
-  const notify = (status, detail) => {
-    if (onStatus && videoId) onStatus(videoId, status, detail);
+  const notify = (status, detail, extra) => {
+    if (onStatus && videoId) onStatus(videoId, status, detail, extra);
   };
 
   try {
@@ -186,7 +186,35 @@ async function processVideo({
           notify('uploading_drive', 'Uploading reels to Google Drive...');
           processedReels = await driveUploader.uploadReels(processedReels, videoId);
           const uploadedCount = processedReels.filter((r) => r.driveLink).length;
-          notify('uploaded_drive', `Uploaded ${uploadedCount} reel(s) to Google Drive`);
+          const failedDriveCount = processedReels.filter((r) => r.driveError).length;
+
+          if (uploadedCount > 0) {
+            notify('uploaded_drive', `Uploaded ${uploadedCount} reel(s) to Google Drive${failedDriveCount > 0 ? ` (${failedDriveCount} failed)` : ''}`);
+          }
+
+          // For reels that failed Drive upload, fall back to local serving
+          if (failedDriveCount > 0) {
+            console.warn(`[pipeline] ${failedDriveCount} reel(s) failed Drive upload — falling back to local serving`);
+            const servableDir = path.join(__dirname, '../../uploads/reels', videoId);
+            if (!fs.existsSync(servableDir)) {
+              fs.mkdirSync(servableDir, { recursive: true });
+            }
+            processedReels = processedReels.map((reel) => {
+              if (!reel.driveError || !reel.outputPath || !fs.existsSync(reel.outputPath)) return reel;
+              try {
+                const destPath = path.join(servableDir, path.basename(reel.outputPath));
+                fs.renameSync(reel.outputPath, destPath);
+                return {
+                  ...reel,
+                  outputPath: destPath,
+                  localUrl: `/api/reels/${videoId}/${path.basename(reel.outputPath)}`,
+                };
+              } catch (moveErr) {
+                console.error(`[pipeline] Failed to move reel #${reel.reelId} to servable dir:`, moveErr.message);
+                return reel;
+              }
+            });
+          }
 
           // Clean up reels directory after Drive upload
           cleanupDir(reelsOutputDir);
@@ -227,9 +255,10 @@ async function processVideo({
       console.log('[pipeline] autoProcess=false — skipping Phase 2 cuts');
     }
 
-    // 6. Mark completed
+    // 6. Mark completed — pass reels in notify so caller stores them
+    // BEFORE statusMap is set to 'completed' (prevents SSE race condition)
     await supabase.updateVideoStatus(videoId, 'completed');
-    notify('completed', 'All processing complete');
+    notify('completed', 'All processing complete', { processedReels });
 
     // Clean up local video file and temp artifacts
     try { fs.unlinkSync(localVideoPath); } catch (_) {}

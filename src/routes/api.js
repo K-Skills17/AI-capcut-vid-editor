@@ -72,19 +72,19 @@ router.post('/upload', apiLimiter, uploadTimeout, upload.single('video'), async 
       videoType,
       userEmail: userEmail || null,
       autoProcess: shouldAutoProcess,
-      onStatus: (videoId, status, detail) => {
+      onStatus: (videoId, status, detail, extra) => {
+        // On completed: store reels BEFORE setting statusMap so SSE consumers
+        // can fetch results immediately without a race condition
+        if (status === 'completed' && extra?.processedReels) {
+          extra.processedReels._storedAt = Date.now();
+          reelsMap.set(videoId, extra.processedReels);
+        }
         statusMap.set(videoId, { status, detail, updatedAt: Date.now() });
       },
     });
 
     // Wait for full processing to complete
     const result = await processingPromise;
-
-    // Store reel results for later retrieval by the results endpoint
-    if (result.processedReels) {
-      result.processedReels._storedAt = Date.now();
-      reelsMap.set(result.videoId, result.processedReels);
-    }
 
     res.json({
       success: true,
@@ -150,14 +150,15 @@ router.post('/upload-async', apiLimiter, uploadTimeout, upload.single('video'), 
       userEmail: userEmail || null,
       autoProcess: shouldAutoProcess,
       existingVideoId: videoId,
-      onStatus: (vid, status, detail) => {
+      onStatus: (vid, status, detail, extra) => {
+        // On completed: store reels BEFORE setting statusMap so SSE consumers
+        // can fetch results immediately without a race condition
+        if (status === 'completed' && extra?.processedReels) {
+          extra.processedReels._storedAt = Date.now();
+          reelsMap.set(vid, extra.processedReels);
+        }
         statusMap.set(vid, { status, detail, updatedAt: Date.now() });
       },
-    }).then((result) => {
-      if (result.processedReels) {
-        result.processedReels._storedAt = Date.now();
-        reelsMap.set(videoId, result.processedReels);
-      }
     }).catch((err) => {
       console.error(`Background processing error for ${videoId}:`, err);
       statusMap.set(videoId, { status: 'error', detail: err.message, updatedAt: Date.now() });
