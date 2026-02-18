@@ -104,11 +104,17 @@ async function processVideo({
 
     const transcriptResult = await transcription.processTranscription(localVideoPath);
 
-    // Update duration
+    // Update duration in database (or in-memory store)
     if (transcriptResult.duration) {
       const client = supabase.getClient();
       if (client) {
         await client.from('videos').update({ duration: transcriptResult.duration }).eq('id', videoId);
+      } else {
+        // In-memory mode: update the record directly
+        try {
+          const video = await supabase.getVideo(videoId);
+          if (video) video.duration = transcriptResult.duration;
+        } catch (_) {}
       }
     }
 
@@ -181,8 +187,37 @@ async function processVideo({
           processedReels = await driveUploader.uploadReels(processedReels, videoId);
           const uploadedCount = processedReels.filter((r) => r.driveLink).length;
           notify('uploaded_drive', `Uploaded ${uploadedCount} reel(s) to Google Drive`);
-        } else if (!driveUploader.isConfigured()) {
-          console.log('[pipeline] Google Drive not configured — reels stay on local disk');
+
+          // Clean up reels directory after Drive upload
+          cleanupDir(reelsOutputDir);
+          reelsOutputDir = null;
+        } else if (!driveUploader.isConfigured() && successCount > 0) {
+          // Move reels to a persistent servable directory (/uploads/reels/<videoId>/)
+          const servableDir = path.join(__dirname, '../../uploads/reels', videoId);
+          if (!fs.existsSync(servableDir)) {
+            fs.mkdirSync(servableDir, { recursive: true });
+          }
+
+          processedReels = processedReels.map((reel) => {
+            if (reel.status !== 'success' || !reel.outputPath) return reel;
+            try {
+              const destPath = path.join(servableDir, path.basename(reel.outputPath));
+              fs.renameSync(reel.outputPath, destPath);
+              return {
+                ...reel,
+                outputPath: destPath,
+                localUrl: `/api/reels/${videoId}/${path.basename(reel.outputPath)}`,
+              };
+            } catch (moveErr) {
+              console.error(`[pipeline] Failed to move reel #${reel.reelId}:`, moveErr.message);
+              return reel;
+            }
+          });
+
+          // Clean up now-empty temp reels dir
+          cleanupDir(reelsOutputDir);
+          reelsOutputDir = null;
+          console.log(`[pipeline] Google Drive not configured — reels served locally at /api/reels/${videoId}/`);
         }
       } else {
         console.error('[pipeline] parseCutData returned null — autocut skipped. AI output may not contain structured cut data.');

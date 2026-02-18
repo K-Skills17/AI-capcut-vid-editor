@@ -327,15 +327,16 @@
 
     let html = '';
 
-    // Show processed reel download links (from Google Drive)
+    // Show processed reel download links (from Google Drive or local server)
     const reels = data.processedReels || [];
-    const driveReels = reels.filter((r) => r.status === 'success' && r.driveLink);
-    if (driveReels.length > 0) {
+    const availableReels = reels.filter((r) => r.status === 'success' && (r.driveLink || r.localUrl));
+    if (availableReels.length > 0) {
       html += '<div class="reel-downloads">';
       html += '<h3>Your Processed Reels</h3>';
       html += '<div class="reel-links">';
-      driveReels.forEach((r) => {
-        html += `<a href="${escapeHtml(r.driveLink)}" target="_blank" rel="noopener" class="btn btn-primary btn-sm reel-link">
+      availableReels.forEach((r) => {
+        const link = r.driveLink || r.localUrl;
+        html += `<a href="${escapeHtml(link)}" target="_blank" rel="noopener" class="btn btn-primary btn-sm reel-link">
           <span>&#9654;</span> ${escapeHtml(r.title || 'Reel #' + r.reelId)}
           ${r.targetDuration ? '<span class="reel-duration">' + r.targetDuration + 's</span>' : ''}
         </a>`;

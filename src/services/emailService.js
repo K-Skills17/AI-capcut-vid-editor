@@ -52,17 +52,21 @@ async function sendResultsEmail({ to, videoId, originalName, videoType, reels, c
 
   const transport = getTransporter();
 
-  // Build reel links section
+  // Build reel links section (supports both Drive and local URLs)
   let reelSection = '';
   if (reels && reels.length > 0) {
     const reelLinks = reels
-      .filter((r) => r.status === 'success' && r.driveLink)
-      .map((r) => `  - ${r.title || `Reel #${r.reelId}`}: ${r.driveLink}`)
+      .filter((r) => r.status === 'success' && (r.driveLink || r.localUrl))
+      .map((r) => {
+        const link = r.driveLink || (appUrl ? `${appUrl}${r.localUrl}` : r.localUrl);
+        return `  - ${r.title || `Reel #${r.reelId}`}: ${link}`;
+      })
       .join('\n');
 
     if (reelLinks) {
+      const source = reels.some((r) => r.driveLink) ? 'Google Drive' : 'Server';
       reelSection = `
-YOUR PROCESSED REELS (Google Drive):
+YOUR PROCESSED REELS (${source}):
 ${reelLinks}
 
 `;
@@ -97,8 +101,11 @@ Powered by LK Digital Content Factory
   // HTML version
   const reelHtml = reels && reels.length > 0
     ? reels
-      .filter((r) => r.status === 'success' && r.driveLink)
-      .map((r) => `<li><a href="${r.driveLink}">${r.title || `Reel #${r.reelId}`}</a> (${r.targetDuration || '?'}s)</li>`)
+      .filter((r) => r.status === 'success' && (r.driveLink || r.localUrl))
+      .map((r) => {
+        const link = r.driveLink || (appUrl ? `${appUrl}${r.localUrl}` : r.localUrl);
+        return `<li><a href="${link}">${r.title || `Reel #${r.reelId}`}</a> (${r.targetDuration || '?'}s)</li>`;
+      })
       .join('\n')
     : '';
 
